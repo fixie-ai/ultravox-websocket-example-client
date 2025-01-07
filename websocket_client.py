@@ -172,6 +172,10 @@ class WebsocketVoiceSession(pyee.asyncio.AsyncIOEventEmitter):
         self, tool_name: str, invocation_id: str, parameters: dict[str, Any]
     ):
         logging.info(f"client tool call: {tool_name}")
+        response: dict[str, str] = {
+            "type": "client_tool_result",
+            "invocationId": invocation_id,
+        }
         if tool_name == "getSecretMenu":
             menu = [
                 {
@@ -188,17 +192,11 @@ class WebsocketVoiceSession(pyee.asyncio.AsyncIOEventEmitter):
                     ],
                 },
             ]
-            result = {
-                "result": json.dumps(menu),
-            }
+            response["result"] = json.dumps(menu)
         else:
-            result = {
-                "errorType": "undefined",
-                "errorMessage": f"Unknown tool: {tool_name}",
-            }
-        result["invocationId"] = invocation_id
-        result["type"] = "client_tool_result"
-        await self._socket.send(json.dumps(result))
+            response["errorType"] = "undefined"
+            response["errorMessage"] = f"Unknown tool: {tool_name}"
+        await self._socket.send(json.dumps(response))
 
     async def _pump_audio(self, source: LocalAudioSource):
         async for chunk in source.stream():
@@ -306,6 +304,7 @@ async def main():
     @client.on("state")
     async def on_state(state):
         if state == "listening":
+            # Used to prompt the user to speak
             print("User:  ", end="\r")
         elif state == "thinking":
             print("Agent: ", end="\r")
@@ -427,12 +426,12 @@ CARAMEL MOCHA LATTE $3.49""",
     parser.add_argument(
         "--secret-menu",
         action="store_true",
-        help="Adds prompt and client-implemented tool for the secret menu. For use with default system prompt.",
+        help="Adds prompt and client-implemented tool for a secret menu. For use with the default system prompt.",
     )
     parser.add_argument(
         "--experimental-messages",
         type=str,
-        help="Enables experimental messages",
+        help="Enables the specified experimental messages (e.g. 'debug' which should be used with -v)",
     )
     parser.add_argument(
         "--prior-call-id",
