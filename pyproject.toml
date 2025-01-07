@@ -1,0 +1,28 @@
+[project]
+name = "ultravox-websocket-example-client"
+version = "0.1.0"
+description = "Example integration of Ultravox Realtime using websockets."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "aiohttp>=3.11.11",
+    "numpy>=2.2.1",
+    "pyee>=11.1.1",
+    "sounddevice>=0.5.1",
+    "websockets>=14.1",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8.6",
+]
+
+[tool.ruff.lint]
+extend-select = ["I", "B", "ASYNC"]
+ignore = [
+    "E731",  # This is silly. Functions are first class objects in Python.
+]
+
+[tool.ruff.lint.isort]
+force-single-line = true
+single-line-exclusions = ["typing"]
