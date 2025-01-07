@@ -18,11 +18,15 @@ from websockets.asyncio import client as ws_client
 
 
 class LocalAudioSink:
-    """AudioSink that plays to the default audio device."""
+    """
+    A sink for audio. Buffered audio is played using the default audio device.
 
-    def __init__(self, sample_rate: int = 48000, num_channels: int = 1) -> None:
+    Args:
+        sample_rate: The sample rate to use for audio playback. Defaults to 48kHz.
+    """
+
+    def __init__(self, sample_rate: int = 48000) -> None:
         self._sample_rate = sample_rate
-        self._num_channels = num_channels
         self._buffer: bytearray = bytearray()
 
         def callback(outdata: np.ndarray, frame_count, time, status):
@@ -32,12 +36,12 @@ class LocalAudioSink:
             if len(next_frame) < output_frame_size:
                 next_frame += b"\x00" * (output_frame_size - len(next_frame))
             outdata[:] = np.frombuffer(next_frame, dtype="int16").reshape(
-                (frame_count, num_channels)
+                (frame_count, 1)
             )
 
         self._stream = sounddevice.OutputStream(
             samplerate=sample_rate,
-            channels=num_channels,
+            channels=1,
             callback=callback,
             device=None,
             dtype="int16",
@@ -48,9 +52,11 @@ class LocalAudioSink:
             raise RuntimeError("Failed to start streaming output audio")
 
     def write(self, chunk: bytes) -> None:
+        """Writes audio data (expected to be in 16-bit PCM format) to this sink's buffer."""
         self._buffer.extend(chunk)
 
     def drop_buffer(self) -> None:
+        """Drops all audio data in this sink's buffer, ending playback until new data is written."""
         self._buffer.clear()
 
     async def close(self) -> None:
@@ -59,11 +65,16 @@ class LocalAudioSink:
 
 
 class LocalAudioSource:
-    """AudioSource that reads from the default microphone."""
+    """
+    A source for audio data that reads from the default microphone. Audio data in
+    16-bit PCM format is available as an AsyncGenerator via the `stream` method.
 
-    def __init__(self, sample_rate=48000, channels=1):
+    Args:
+        sample_rate: The sample rate to use for audio recording. Defaults to 48kHz.
+    """
+
+    def __init__(self, sample_rate=48000):
         self._sample_rate = sample_rate
-        self._num_channels = channels
 
     async def stream(self) -> AsyncGenerator[bytes, None]:
         queue: asyncio.Queue[bytes] = asyncio.Queue()
@@ -74,7 +85,7 @@ class LocalAudioSource:
 
         stream = sounddevice.InputStream(
             samplerate=self._sample_rate,
-            channels=self._num_channels,
+            channels=1,
             callback=callback,
             device=None,
             dtype="int16",
@@ -88,6 +99,9 @@ class LocalAudioSource:
 
 
 class WebsocketVoiceSession(pyee.asyncio.AsyncIOEventEmitter):
+    """A websocket-based voice session that connects to an Ultravox call. The session continuously
+    streams audio in and out and emits events for state changes and agent messages."""
+
     def __init__(self, join_url: str):
         super().__init__()
         self._state: Literal["idle", "listening", "thinking", "speaking"] = "idle"
@@ -103,9 +117,9 @@ class WebsocketVoiceSession(pyee.asyncio.AsyncIOEventEmitter):
     async def start(self):
         logging.info(f"Connecting to {self._url}")
         self._socket = await ws_client.connect(self._url)
-        self._receive_task = asyncio.create_task(self.socket_receive(self._socket))
+        self._receive_task = asyncio.create_task(self._socket_receive(self._socket))
 
-    async def socket_receive(self, socket: ws_client.ClientConnection):
+    async def _socket_receive(self, socket: ws_client.ClientConnection):
         try:
             async for message in socket:
                 await self._on_socket_message(message)
@@ -120,6 +134,7 @@ class WebsocketVoiceSession(pyee.asyncio.AsyncIOEventEmitter):
         self.emit("ended")
 
     async def stop(self):
+        """End the session, closing the connection and ending the call."""
         logging.info("Stopping...")
         await _async_close(
             self._sink.close(),
@@ -136,9 +151,9 @@ class WebsocketVoiceSession(pyee.asyncio.AsyncIOEventEmitter):
             return
         elif isinstance(payload, str):
             msg = json.loads(payload)
-            await self.handle_data_message(msg)
+            await self._handle_data_message(msg)
 
-    async def handle_data_message(self, msg: dict[str, Any]):
+    async def _handle_data_message(self, msg: dict[str, Any]):
         match msg["type"]:
             case "playback_clear_buffer":
                 self._sink.drop_buffer()
@@ -232,6 +247,8 @@ async def _async_cancel(*tasks_or_none: asyncio.Task | None):
 
 
 async def _get_join_url() -> str:
+    """Creates a new call, returning its join URL."""
+
     target = "https://api.ultravox.ai/api/calls"
     if args.prior_call_id:
         target += f"?priorCallId={args.prior_call_id}"
